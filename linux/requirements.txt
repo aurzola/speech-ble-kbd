@@ -1,0 +1,2 @@
+bluez-peripheral==0.1.7
+evdev==2.0.0

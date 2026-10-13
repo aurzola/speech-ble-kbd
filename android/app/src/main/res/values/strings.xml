@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">SpeechBLE KBD</string>
+    <string name="connect">Conectar</string>
+    <string name="start_dictation">Iniciar dictado</string>
+    <string name="stop_dictation">Detener dictado</string>
+    <string name="hint_connect">Conecta al ESP32-S3 y dicta.</string>
+    <string name="live">Texto reconocido</string>
+    <string name="manual">Envío manual</string>
+    <string name="manual_hint">texto a enviar…</string>
+    <string name="send">Enviar</string>
+    <string name="enter">Enter</string>
+    <string name="backspace">Borrar</string>
+    <string name="clear">Clear</string>
+    <string name="log">Registro</string>
+    <string name="layout_label">Layout del teclado del PC</string>
+
+    <string-array name="layout_labels">
+        <item>US — English (US)</item>
+        <item>ES — Español (España)</item>
+    </string-array>
+    <string-array name="layout_codes">
+        <item>US</item>
+        <item>ES</item>
+    </string-array>
+    <string-array name="layout_langs">
+        <item>en-US</item>
+        <item>es-ES</item>
+    </string-array>
+</resources>

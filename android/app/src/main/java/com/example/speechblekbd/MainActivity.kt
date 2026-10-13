@@ -22,6 +22,9 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
         private const val PARTIAL_THROTTLE_MS = 200L
         private const val MAX_DOC_LEN = 200
 
+        /** Keyboard layout selected by default (Spanish). */
+        private const val DEFAULT_LAYOUT = "ES"
+
         /** Enter keywords, matched against folded (lowercase, no accents) text. */
         private val ENTER_PHRASE = Regex(
             "\\b(?:enter|intro|nueva\\s+linea|salto\\s+de\\s+linea|linea\\s+nueva)\\b"
@@ -34,7 +37,7 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
 
     private var listening = false
     private var pendingConnect = false
-    private var pendingLayout = "US"
+    private var pendingLayout = DEFAULT_LAYOUT
 
     /** Text already committed on the host. The live partial is streamed on top. */
     private val committed = StringBuilder()
@@ -186,14 +189,15 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
 
     private fun setupLayoutSpinner() {
         val labels = resources.getStringArray(R.array.layout_labels)
+        val codes = resources.getStringArray(R.array.layout_codes)
+        val langs = resources.getStringArray(R.array.layout_langs)
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.layoutSpinner.adapter = adapter
         binding.layoutSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val code = resources.getStringArray(R.array.layout_codes)[position]
-                val lang = resources.getStringArray(R.array.layout_langs)[position]
-                speech.language = lang
+                val code = codes[position]
+                speech.language = langs[position]
                 pendingLayout = code
                 if (nus.isConnected()) {
                     nus.send("L:$code")
@@ -203,6 +207,11 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        // Start on the host layout by default instead of the first array entry.
+        val defaultPosition = codes.indexOfFirst { it == DEFAULT_LAYOUT }.coerceAtLeast(0)
+        binding.layoutSpinner.setSelection(defaultPosition)
+        speech.language = langs[defaultPosition]
+        pendingLayout = codes[defaultPosition]
     }
 
     private fun toggleListening() {

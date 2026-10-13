@@ -54,6 +54,15 @@ id | grep -q input && echo "grupo input OK"
 
 ## Uso
 
+**Con el guion** (crea el venv e instala dependencias la primera vez):
+
+```bash
+./linux/run.sh          # o: cd linux && ./run.sh
+./linux/run.sh -v       # logs detallados; ./linux/run.sh --help para más opciones
+```
+
+**Manualmente:**
+
 ```bash
 source linux/.venv/bin/activate    # o usa linux/.venv/bin/python directamente
 python linux/ble_kbd.py            # añade -v para logs detallados

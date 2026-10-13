@@ -2,6 +2,7 @@ package com.example.speechblekbd.speech
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -42,9 +43,26 @@ class ContinuousSpeech(
         get() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            // Prefer the networked recognizer: it is markedly more accurate than offline.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+            // Endpointing: allow pauses without cutting the sentence.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000L)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Bias toward the words we actually use (control keywords + common terms).
+                putStringArrayListExtra(
+                    RecognizerIntent.EXTRA_BIASING_STRINGS,
+                    arrayListOf("enter", "intro", "nueva línea", "salto de línea", "línea nueva"),
+                )
+                // Automatic punctuation/capitalization, optimized for accuracy.
+                putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY)
+            }
         }
 
     fun start() {

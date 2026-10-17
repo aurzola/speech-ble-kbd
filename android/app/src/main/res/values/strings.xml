@@ -13,6 +13,23 @@
     <string name="clear">Clear</string>
     <string name="log">Registro</string>
     <string name="layout_label">Layout del teclado del PC</string>
+    <string name="engine_label">Motor de dictado</string>
+    <string name="dictation_label">Idioma del dictado (reconocimiento)</string>
+    <string name="download_model">Descargar modelo</string>
+    <string name="model_needed">Este motor no necesita modelo local.</string>
+    <string name="model_unsupported">Este idioma no tiene modelo Vosk disponible.</string>
+    <string name="model_installed">Modelo Vosk (%1$s): instalado.</string>
+    <string name="model_missing">Modelo Vosk (%1$s): ausente. Descárgalo para usar el motor offline.</string>
+    <string name="model_downloading">Descargando modelo %1$s… %2$d%%</string>
+
+    <string-array name="dictation_labels">
+        <item>Español (España)</item>
+        <item>English (US)</item>
+    </string-array>
+    <string-array name="dictation_langs">
+        <item>es-ES</item>
+        <item>en-US</item>
+    </string-array>
 
     <string-array name="layout_labels">
         <item>US — English (US)</item>

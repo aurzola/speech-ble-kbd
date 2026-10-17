@@ -39,6 +39,49 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/engine_label"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/engineSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/dictation_label"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/dictationSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/modelStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/downloadModelButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/download_model"
+            android:visibility="gone"
+            app:icon="@drawable/ic_send"
+            app:iconGravity="textStart" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/connectButton"
             android:layout_width="match_parent"
@@ -56,6 +99,14 @@
             android:text="@string/start_dictation"
             app:icon="@drawable/ic_mic"
             app:iconGravity="textStart" />
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/levelBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:max="100"
+            app:trackCornerRadius="4dp" />
 
         <TextView
             android:layout_width="match_parent"

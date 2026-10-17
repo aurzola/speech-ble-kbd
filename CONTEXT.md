@@ -1,7 +1,8 @@
 # CONTEXT — estado del proyecto y del entorno
 
 Documento de contexto para retomar el trabajo sin perder decisiones ni datos
-verificados. Última actualización: prueba end-to-end con teléfono real (OK).
+verificados. Última actualización: P2 (Vosk offline) implementado y compilado
+(rama `feature/p2-streaming-asr`), pendiente de probar en teléfono.
 
 ## Objetivo
 
@@ -41,6 +42,19 @@ de periférico BLE NUS** (sin ESP32) y escribe con un teclado virtual `uinput`.
   (no venían en el repo) y se creó `android/local.properties` con
   `sdk.dir=/home/alexander_urzola/Android/Sdk`.
 - Rebuild: `cd android && ./gradlew assembleDebug` (usa JDK 17).
+- **P2 (rama `feature/p2-streaming-asr`)**: dictado **Vosk offline** detrás de la
+  interfaz `speech/DictationEngine.kt`. Nuevos archivos: `VoskSpeechEngine.kt`
+  (`AudioRecord` 16 kHz mono + `Recognizer` streaming + `EnergyVad` + nivel),
+  `VoskModelStore.kt` (descarga/descompresión de modelos, `filesDir/models/…`),
+  `EnergyVad.kt`. `ContinuousSpeech` refactorizado para implementar la interfaz
+  (mismos extras, ahora `id="system"`). UI: spinners de motor e idioma de
+  dictado, estado del modelo y botón *Descargar modelo*, `LinearProgressIndicator`
+  de nivel. Persistencia en `SharedPreferences` (`engine`, `dictation_lang`,
+  `layout`). Dep: `com.alphacephei:vosk-android:0.3.47` (+ JNA transitivo).
+  APK con Vosk ≈ 43 MB (libs nativas arm64-v8a/armeabi-v7a/x86/x86_64).
+  Modelos: `vosk-model-small-es-0.42` / `vosk-model-small-en-us-0.15`.
+  Probado en teléfono: descarga del modelo OK, motor arranca y se detiene sin
+  crash (ver "Hechos verificados").
 
 ### ESP32 (`esp32/`)
 - **Compila**: `esp32/build/speech_ble_kbd.bin` (505 KB). Fix aplicado en
@@ -118,6 +132,24 @@ de periférico BLE NUS** (sin ESP32) y escribe con un teclado virtual `uinput`.
 - **UI**: botones de acción como `MaterialButton` con `app:icon` + texto
   (`app:iconGravity="textStart"`), iconos vectoriales en `res/drawable/ic_*.xml`.
   Evita el desalineado del glifo `⏎` (fuente de respaldo con métricas distintas).
+- **Vosk (P2)**: artefacto `com.alphacephei:vosk-android:0.3.47` (AAR 12.3 MB;
+  libs arm64-v8a/armeabi-v7a/x86/x86_64) depende de `net.java.dev.jna:jna:5.13.0`
+  (type `aar`, se resuelve transitivamente). API (verificada con `javap`):
+  `Model(String)`, `Recognizer(Model,float)`, `acceptWaveForm(byte[],int)->boolean`,
+  `getResult/getPartialResult/getFinalResult`, `setWords`, `setMaxAlternatives`,
+  `close`; `LibVosk.setLogLevel(LogLevel)`; `org.vosk.android.StorageService`.
+  URLs de modelos (HTTP 200): `https://alphacephei.com/vosk/models/` +
+  `vosk-model-small-es-0.42.zip` (39.8 MB) / `vosk-model-small-en-us-0.15.zip`
+  (41.2 MB). `assembleDebug` con Vosk OK (43 MB).
+- **P2 verificado en el teléfono** (2026-10-17, Xiaomi `24117RN76L` Android 16):
+  instalado el APK; la app arranca con los controles nuevos; al elegir
+  *Motor = Vosk (offline)* el botón *Descargar modelo* aparece con "ausente"; la
+  descarga llegó a 100% y el descomprimido dejó `files/models/vosk-model-small-es-0.42`
+  (`am/ conf/ graph/ ivector/ README`); el estado pasó a "instalado". *Iniciar
+  dictado* → `Cargando modelo…` → `AudioRecord` con `inputSource 6`
+  (VOICE_RECOGNITION), 16 kHz mono, `capturing from built-in mic`, `Escuchando…`;
+  *Detener* libera el `AudioRecord` sin errores (estado `Dictado detenido`). Sin
+  crash. **Falta** probar reconocimiento con voz real (no se pudo hacer por adb).
 
 ## Cómo instalar la app en el teléfono
 
@@ -145,25 +177,29 @@ Tras instalar: concede **micrófono** y **Bluetooth**, empareja/conecta el daemo
 
 ## Próximos pasos
 
-1. **Hecho**: probado con teléfono real (dictado/escribir en el host) — ver
+1. **P2**: probar en el teléfono el motor **Vosk offline** (`feature/p2-streaming-asr`):
+   descargar el modelo en la app (o `adb push`), elegir *Motor = Vosk (offline)* y
+   verificar dictado continuo + medidor de nivel. Ajustar `EnergyVad.threshold`
+   si el nivel no se mueve. (Compilado y APK verificado, device no conectado.)
+2. **Hecho**: probado con teléfono real (dictado/escribir en el host) — ver
    "Hechos verificados". Falta solo afinar el layout de GNOME (`US` o `Español
    (España)`) para que coincida con el de la app.
-2. Arrancar el daemon: `cd linux && .venv/bin/python ble_kbd.py` (o como unidad
+3. Arrancar el daemon: `cd linux && .venv/bin/python ble_kbd.py` (o como unidad
    transitoria de usuario:
    `systemd-run --user --unit=speech-ble-kbd --collect --working-directory=$PWD/linux $PWD/linux/.venv/bin/python ble_kbd.py -v`;
    logs con `journalctl --user -u speech-ble-kbd -f`). Comprobar advertising con
    `busctl --system get-property org.bluez /org/bluez/hci0 org.bluez.LEAdvertisingManager1 ActiveInstances` (debe ser `y 1`).
-3. Si el advertising falla en otra máquina, activar `Experimental = true` en
+4. Si el advertising falla en otra máquina, activar `Experimental = true` en
    `/etc/bluetooth/main.conf` y reiniciar `bluetoothd`.
-4. (Opcional) Detectar desconexión para hacer *release-all*; hoy no es necesario
+5. (Opcional) Detectar desconexión para hacer *release-all*; hoy no es necesario
    porque el espejo del daemon sigue siendo consistente con el host.
 
 ## Estructura
 
 ```
 speech-ble-kbd/
-├── android/   # app Kotlin (dictado + cliente BLE NUS)
+├── android/   # app Kotlin (dictado: Vosk offline / sistema + cliente BLE NUS)
 ├── esp32/     # firmware ESP-IDF (periférico NUS + USB HID)
-├── linux/     # daemon Python (periférico NUS + teclado uinput)   ← nuevo
+├── linux/     # daemon Python (periférico NUS + teclado uinput)
 └── README.md  # visión general de los tres modos
 ```

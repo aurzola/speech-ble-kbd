@@ -12,32 +12,36 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 
 /**
- * Wraps [SpeechRecognizer] to provide quasi-continuous dictation.
+ * Dictation engine backed by Android's [SpeechRecognizer].
  *
- * Android's recognizer stops after one utterance, so we restart it on every
- * result/error. Partial results are surfaced for live UI feedback; only final
- * results are forwarded (see [onFinal]).
+ * Provides quasi-continuous dictation: the recognizer stops after one utterance,
+ * so we restart it on every result/error. Partial results are surfaced for live
+ * UI feedback; only final results are forwarded (see [DictationCallbacks.onFinal]).
  *
  * All methods must be called from the main thread.
  */
 class ContinuousSpeech(
     private val context: Context,
-    private val onPartial: (String) -> Unit,
-    private val onFinal: (String) -> Unit,
-    private val onState: (String) -> Unit,
-) {
+    private val callbacks: DictationCallbacks,
+) : DictationEngine {
+
     companion object {
         private const val TAG = "ContinuousSpeech"
         private const val RESTART_DELAY_MS = 250L
     }
 
+    override val id = "system"
+    override val label = "Sistema (online)"
+
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var running = false
 
-    var language: String = "es-ES"
+    override var language: String = "es-ES"
 
-    fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
+    override fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
+
+    override fun unavailableReason(): String = "Reconocimiento de voz no disponible en este teléfono"
 
     private val intent: Intent
         get() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -65,8 +69,12 @@ class ContinuousSpeech(
             }
         }
 
-    fun start() {
+    override fun start() {
         if (running) return
+        if (!isAvailable()) {
+            callbacks.onError(unavailableReason(), true)
+            return
+        }
         running = true
         main.post {
             if (recognizer == null) {
@@ -74,20 +82,20 @@ class ContinuousSpeech(
                     setRecognitionListener(listener)
                 }
             }
-            onState("Escuchando…")
+            callbacks.onState("Escuchando…")
             recognizer?.startListening(intent)
         }
     }
 
-    fun stop() {
+    override fun stop() {
         running = false
         main.post {
             recognizer?.cancel()
-            onState("Dictado detenido")
+            callbacks.onState("Dictado detenido")
         }
     }
 
-    fun release() {
+    override fun release() {
         running = false
         main.post {
             recognizer?.destroy()
@@ -108,14 +116,14 @@ class ContinuousSpeech(
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 ?.takeIf { it.isNotBlank() }
-                ?.let(onPartial)
+                ?.let(callbacks.onPartial)
         }
 
         override fun onResults(results: Bundle?) {
             val text = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
-            if (!text.isNullOrBlank()) onFinal(text)
+            if (!text.isNullOrBlank()) callbacks.onFinal(text)
             scheduleRestart()
         }
 
@@ -127,7 +135,10 @@ class ContinuousSpeech(
 
         override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onRmsChanged(rmsdB: Float) {
+            // rmsdB is roughly -2 (loud) .. -120 (silence). Map to a 0..1 meter.
+            callbacks.onLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
+        }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
         override fun onEvent(eventType: Int, params: Bundle?) {}

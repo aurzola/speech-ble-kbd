@@ -1,6 +1,8 @@
 package com.example.speechblekbd
 
 import android.Manifest
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +17,10 @@ import androidx.core.content.ContextCompat
 import com.example.speechblekbd.ble.NusClient
 import com.example.speechblekbd.databinding.ActivityMainBinding
 import com.example.speechblekbd.speech.ContinuousSpeech
+import com.example.speechblekbd.speech.DictationCallbacks
+import com.example.speechblekbd.speech.DictationEngine
+import com.example.speechblekbd.speech.VoskModelStore
+import com.example.speechblekbd.speech.VoskSpeechEngine
 
 class MainActivity : AppCompatActivity(), NusClient.Listener {
 
@@ -25,6 +31,14 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
         /** Keyboard layout selected by default (Spanish). */
         private const val DEFAULT_LAYOUT = "ES"
 
+        /** Dictation (recognition) language selected by default. */
+        private const val DEFAULT_DICTATION_LANG = "es-ES"
+
+        private const val PREFS = "speech_ble_kbd"
+        private const val PREF_ENGINE = "engine"
+        private const val PREF_DICTATION_LANG = "dictation_lang"
+        private const val PREF_LAYOUT = "layout"
+
         /** Enter keywords, matched against folded (lowercase, no accents) text. */
         private val ENTER_PHRASE = Regex(
             "\\b(?:enter|intro|nueva\\s+linea|salto\\s+de\\s+linea|linea\\s+nueva)\\b"
@@ -33,11 +47,19 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var nus: NusClient
-    private lateinit var speech: ContinuousSpeech
+    private lateinit var prefs: SharedPreferences
+    private lateinit var modelStore: VoskModelStore
+
+    /** Dictation engines by id, in menu order. */
+    private val engines = LinkedHashMap<String, DictationEngine>()
+    private var activeEngine: DictationEngine? = null
+    private var activeEngineId = "system"
 
     private var listening = false
     private var pendingConnect = false
     private var pendingLayout = DEFAULT_LAYOUT
+    private var dictationLanguage = DEFAULT_DICTATION_LANG
+    private var downloading = false
 
     /** Text already committed on the host. The live partial is streamed on top. */
     private val committed = StringBuilder()
@@ -63,9 +85,11 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        modelStore = VoskModelStore(this)
         nus = NusClient(this, this)
-        speech = ContinuousSpeech(
-            context = this,
+
+        val callbacks = DictationCallbacks(
             onPartial = { partial ->
                 binding.partialText.text = "$committed$partial"
                 streamPartial(partial)
@@ -76,9 +100,19 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
                 lastPartialSent = 0
             },
             onState = { log(it) },
+            onLevel = { level -> binding.levelBar.progress = (level * 100).toInt() },
+            onError = { message, fatal ->
+                log("voz: $message")
+                if (fatal && listening) stopListening()
+            },
         )
 
+        engines["system"] = ContinuousSpeech(this, callbacks)
+        engines["vosk"] = VoskSpeechEngine(this, modelStore, callbacks)
+
         setupLayoutSpinner()
+        setupDictationSpinner()
+        setupEngineSpinner()
 
         binding.connectButton.setOnClickListener {
             val missing = missingPermissions()
@@ -91,6 +125,8 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
         }
 
         binding.listenButton.setOnClickListener { toggleListening() }
+
+        binding.downloadModelButton.setOnClickListener { downloadModel() }
 
         binding.sendTextButton.setOnClickListener {
             val text = binding.manualInput.text?.toString().orEmpty()
@@ -119,7 +155,7 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
         log("Listo. Pulsa Conectar y luego Iniciar dictado.")
     }
 
-    /** Send the whole document (committed + live partial) so the ESP32 can diff. */
+    /** Send the whole document (committed + live partial) so the host can diff. */
     private fun streamPartial(partial: String) {
         if (!nus.isConnected()) return
         val now = SystemClock.elapsedRealtime()
@@ -171,7 +207,7 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
     }
 
     private fun pressEnter() {
-        // The daemon resets its mirror on Enter, so drop ours to stay in sync.
+        // The host resets its mirror on Enter, so drop ours to stay in sync.
         committed.setLength(0)
         if (nus.isConnected()) {
             nus.send("E")
@@ -190,15 +226,14 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
     private fun setupLayoutSpinner() {
         val labels = resources.getStringArray(R.array.layout_labels)
         val codes = resources.getStringArray(R.array.layout_codes)
-        val langs = resources.getStringArray(R.array.layout_langs)
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.layoutSpinner.adapter = adapter
         binding.layoutSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val code = codes[position]
-                speech.language = langs[position]
                 pendingLayout = code
+                prefs.edit().putString(PREF_LAYOUT, code).apply()
                 if (nus.isConnected()) {
                     nus.send("L:$code")
                     log("layout → $code")
@@ -207,16 +242,130 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        // Start on the host layout by default instead of the first array entry.
-        val defaultPosition = codes.indexOfFirst { it == DEFAULT_LAYOUT }.coerceAtLeast(0)
+        val saved = prefs.getString(PREF_LAYOUT, DEFAULT_LAYOUT) ?: DEFAULT_LAYOUT
+        val defaultPosition = codes.indexOfFirst { it == saved }.coerceAtLeast(0)
         binding.layoutSpinner.setSelection(defaultPosition)
-        speech.language = langs[defaultPosition]
         pendingLayout = codes[defaultPosition]
     }
 
+    private fun setupDictationSpinner() {
+        val labels = resources.getStringArray(R.array.dictation_labels)
+        val langs = resources.getStringArray(R.array.dictation_langs)
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.dictationSpinner.adapter = adapter
+        binding.dictationSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                dictationLanguage = langs[position]
+                activeEngine?.language = dictationLanguage
+                prefs.edit().putString(PREF_DICTATION_LANG, dictationLanguage).apply()
+                updateModelStatus()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        val saved = prefs.getString(PREF_DICTATION_LANG, DEFAULT_DICTATION_LANG) ?: DEFAULT_DICTATION_LANG
+        val position = langs.indexOfFirst { it == saved }.coerceAtLeast(0)
+        binding.dictationSpinner.setSelection(position)
+        dictationLanguage = langs[position]
+    }
+
+    private fun setupEngineSpinner() {
+        val ids = engines.keys.toList()
+        val labels = ids.map { engines.getValue(it).label }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.engineSpinner.adapter = adapter
+        binding.engineSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applyEngine(ids[position])
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        val saved = prefs.getString(PREF_ENGINE, "system") ?: "system"
+        activeEngineId = saved.takeIf { engines.containsKey(it) } ?: "system"
+        binding.engineSpinner.setSelection(ids.indexOf(activeEngineId).coerceAtLeast(0))
+        applyEngine(activeEngineId, persist = false)
+    }
+
+    /** Switch the active dictation engine, restarting it if we were listening. */
+    private fun applyEngine(id: String, persist: Boolean = true) {
+        val engine = engines[id] ?: return
+        val wasListening = listening
+        if (wasListening) stopListening()
+        activeEngine = engine
+        activeEngineId = id
+        engine.language = dictationLanguage
+        if (persist) prefs.edit().putString(PREF_ENGINE, id).apply()
+        updateModelStatus()
+        if (wasListening && engine.isAvailable()) startListening()
+    }
+
+    private fun updateModelStatus() {
+        if (activeEngineId != "vosk") {
+            binding.modelStatusText.text = getString(R.string.model_needed)
+            binding.downloadModelButton.visibility = View.GONE
+            return
+        }
+        val spec = modelStore.specFor(dictationLanguage)
+        if (spec == null) {
+            binding.modelStatusText.text = getString(R.string.model_unsupported)
+            binding.downloadModelButton.visibility = View.GONE
+            return
+        }
+        val installed = engines.getValue("vosk").isAvailable()
+        binding.modelStatusText.text = if (installed) {
+            getString(R.string.model_installed, spec.humanName)
+        } else {
+            getString(R.string.model_missing, spec.humanName)
+        }
+        binding.downloadModelButton.visibility = if (installed || downloading) View.GONE else View.VISIBLE
+    }
+
+    private fun downloadModel() {
+        if (downloading) return
+        val spec = modelStore.specFor(dictationLanguage) ?: return
+        downloading = true
+        binding.downloadModelButton.isEnabled = false
+        binding.downloadModelButton.visibility = View.GONE
+        log("Descargando modelo ${spec.humanName}…")
+        var lastPct = -1
+        Thread {
+            try {
+                modelStore.download(dictationLanguage) { done, total ->
+                    if (total > 0) {
+                        val pct = (done * 100 / total).toInt()
+                        if (pct != lastPct) {
+                            lastPct = pct
+                            runOnUiThread {
+                                binding.modelStatusText.text =
+                                    getString(R.string.model_downloading, spec.humanName, pct)
+                            }
+                        }
+                    }
+                }
+                runOnUiThread {
+                    downloading = false
+                    binding.downloadModelButton.isEnabled = true
+                    log("Modelo ${spec.humanName} listo")
+                    updateModelStatus()
+                }
+            } catch (t: Throwable) {
+                runOnUiThread {
+                    downloading = false
+                    binding.downloadModelButton.isEnabled = true
+                    log("Error descargando modelo: ${t.message}")
+                    updateModelStatus()
+                }
+            }
+        }.start()
+    }
+
     private fun toggleListening() {
-        if (!speech.isAvailable()) {
-            toast("Reconocimiento de voz no disponible en este teléfono")
+        val engine = activeEngine ?: return
+        if (!engine.isAvailable()) {
+            toast(engine.unavailableReason())
             return
         }
         val missing = missingPermissions()
@@ -224,15 +373,23 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
             permissionLauncher.launch(missing.toTypedArray())
             return
         }
-        listening = !listening
-        if (listening) {
-            speech.start()
-            binding.listenButton.text = getString(R.string.stop_dictation)
-        } else {
-            speech.stop()
-            binding.listenButton.text = getString(R.string.start_dictation)
-            binding.partialText.text = ""
-        }
+        if (listening) stopListening() else startListening()
+    }
+
+    private fun startListening() {
+        val engine = activeEngine ?: return
+        listening = true
+        engine.language = dictationLanguage
+        engine.start()
+        binding.listenButton.text = getString(R.string.stop_dictation)
+    }
+
+    private fun stopListening() {
+        listening = false
+        activeEngine?.stop()
+        binding.listenButton.text = getString(R.string.start_dictation)
+        binding.levelBar.progress = 0
+        binding.partialText.text = ""
     }
 
     private fun requiredPermissions(): List<String> {
@@ -274,7 +431,7 @@ class MainActivity : AppCompatActivity(), NusClient.Listener {
     override fun onData(text: String) = log("ESP32 → $text")
 
     override fun onDestroy() {
-        speech.release()
+        engines.values.forEach { it.release() }
         nus.disconnect()
         super.onDestroy()
     }

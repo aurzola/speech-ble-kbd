@@ -29,7 +29,7 @@ En ambos modos la **app Android es la misma** y el protocolo es idéntico.
 
 | Módulo   | Ruta      | Qué hace                                                            |
 |----------|-----------|---------------------------------------------------------------------|
-| Android  | `android/`| Dictado con `SpeechRecognizer` + cliente BLE NUS                    |
+| Android  | `android/`| Dictado continuo (Vosk **offline** o `SpeechRecognizer`) + cliente BLE NUS |
 | ESP32-S3 | `esp32/`  | Recibe NUS por BLE y lo convierte en USB HID (TinyUSB, teclado 6KRO)|
 | Linux    | `linux/`  | Periférico NUS (BlueZ) + teclado virtual `uinput` (sin hardware)    |
 
@@ -124,9 +124,25 @@ Requisitos: **Android 8.0+ (API 26)**. Para las vías con cable, activa
 Pasos en el teléfono:
 1. Otorga permisos (micrófono + Bluetooth).
 2. Pulsa **Conectar** → busca el host (ESP32 o daemon) por el servicio NUS.
-3. Elige el **layout del PC** en el desplegable (por defecto `US`).
-4. Pulsa **Iniciar dictado** y habla: el texto parcial se escribe en vivo y se va
+3. Elige el **layout del PC** en el desplegable (por defecto `ES`).
+4. Elige el **motor de dictado** y el **idioma del dictado** (reconocimiento).
+5. Pulsa **Iniciar dictado** y habla: el texto parcial se escribe en vivo y se va
    **corrigiendo** mientras hablas; al terminar cada frase se confirma.
+
+### Motores de dictado
+
+- **Vosk (offline)** — reconocimiento en el propio teléfono, sin red, con
+  streaming continuo (sin cortes entre frases). Necesita un modelo (~40 MB) que
+  se descarga con el botón **Descargar modelo** (o a mano:
+  `adb push vosk-model-small-es-0.42 /data/data/com.example.speechblekbd/files/models/`).
+  Idiomas: **español** (`vosk-model-small-es-0.42`) e **inglés**
+  (`vosk-model-small-en-us-0.15`).
+- **Sistema (online)** — el `SpeechRecognizer` de Android (más preciso, requiere
+  red). Se reinicia tras cada frase.
+
+Ambos motores comparten la interfaz `DictationEngine`, así que el resto de la app
+(protocolo `S:`, teclado del host) no cambia. La barra bajo **Iniciar dictado**
+es un medidor de nivel del micrófono.
 
 ## Layouts de teclado
 
@@ -156,7 +172,11 @@ speech-ble-kbd/
 │   └── app/src/main/java/com/example/speechblekbd/
 │       ├── MainActivity.kt        # UI + dictado continuo (streaming S:)
 │       ├── ble/NusClient.kt       # cliente BLE NUS
-│       └── speech/ContinuousSpeech.kt
+│       └── speech/                # motores de dictado (DictationEngine)
+│           ├── ContinuousSpeech.kt  # SpeechRecognizer de Android (online)
+│           ├── VoskSpeechEngine.kt  # Vosk (offline) + AudioRecord
+│           ├── EnergyVad.kt         # VAD por energía + medidor de nivel
+│           └── VoskModelStore.kt    # descarga/instalación del modelo Vosk
 ├── esp32/                         # firmware ESP-IDF (C) — Modo A
 │   └── main/
 │       ├── app_main.c
